@@ -4,17 +4,13 @@
 
 A novel deep learning architecture that integrates patient symptom co-occurrence graphs (Neo4j) with a temporal attention encoder for bipolar disorder rapid-cycling prediction, with LIME-based clinical decision support.
 
-> **Published:** Al Foysal, A., de Filippis, R. (2024). *Italian Journal of Psychiatry*, 10(1).
-
----
-
 ## Motivation
 
 Existing sequential models (LSTM, 1D-CNN) treat psychiatric assessments as independent time series, discarding the **relational structure** between co-occurring symptoms. Clinical evidence shows that rapid-cycling bipolar disorder is characterised by tightly coupled mood–energy–impulsivity clusters that manifest as distinctive patterns in the symptom co-occurrence graph — information that is lost when symptoms are processed channel-by-channel.
 
 PsychoGraph-Net addresses this by jointly encoding:
-- **Graph stream** — symptom co-occurrence topology extracted from patient EHR data via Neo4j
-- **Temporal stream** — longitudinal symptom dynamics via a pre-norm Transformer encoder
+- **Graph stream** symptom co-occurrence topology extracted from patient EHR data via Neo4j
+- **Temporal stream** longitudinal symptom dynamics via a pre-norm Transformer encoder
 
 ---
 
@@ -76,7 +72,6 @@ Top attributions on a representative rapid-cycling patient:
 
 Consistent with clinical DSM-5 rapid-cycling criteria — mood elevation (hypomanic/manic episodes) is the primary diagnostic signal.
 
----
 
 ## Repository Structure
 
@@ -174,23 +169,6 @@ from explainability.lime_explainer import LIMEExplainer
 explainer = LIMEExplainer(model, use_graph=True, n_perturbations=200)
 result = explainer.explain(temporal[0], node_feats[0], adj[0])
 explainer.print_report(result)
-```
-
-### Connect to Neo4j (production)
-
-```python
-from data.neo4j_loader import Neo4jSymptomGraphLoader
-
-loader = Neo4jSymptomGraphLoader(
-    uri="bolt://localhost:7687",
-    user="neo4j",
-    password="your-password",
-)
-temporal, node_feats, adj, labels = loader.load_all()
-loader.close()
-```
-
----
 
 ## Configuration
 
@@ -230,34 +208,12 @@ Bipolar disorder rapid cycling is defined by ≥4 mood episodes per year and is 
 
 This work was developed in collaboration with clinical researchers at the Istituto di Psicopatologia, Rome, and is part of a broader programme on trustworthy AI for psychiatric decision support.
 
----
-
-## Citation
-
-```bibtex
-@article{foysal2024psychographnet,
-  title   = {PsychoGraph-Net: Graph-Augmented Transformer for Rapid-Cycling 
-             Bipolar Disorder Prediction with LIME Explainability},
-  author  = {Al Foysal, Abdullah and de Filippis, Renato},
-  journal = {Italian Journal of Psychiatry},
-  volume  = {10},
-  number  = {1},
-  year    = {2024}
-}
-```
-
----
-
-## License
-
-MIT License — see `LICENSE` for details.
 
 ---
 
 ## Author
 
 **Abdullah Al Foysal**  
-MSc Computer Engineering (AI) · University of Genoa  
-Research Assistant · InfoMus Lab, Casa Paganini (DIBRIS)  
+MSc Computer Engineering (AI) · University of Genoa    
 
 [Google Scholar](https://scholar.google.com/citations?user=cQ_zolQAAAAJ) · [LinkedIn](https://linkedin.com/in/abdullah-al-foysal1)
