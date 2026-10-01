@@ -1,219 +1,162 @@
+<div align="center">
+
+![PsychoGraph-Net](docs/assets/readme-banner.svg)
+
 # PsychoGraph-Net
 
-**Graph-Augmented Transformer for Psychiatric Prediction**
+### Graph and temporal representations for synthetic psychiatric modeling
 
-A novel deep learning architecture that integrates patient symptom co-occurrence graphs (Neo4j) with a temporal attention encoder for bipolar disorder rapid-cycling prediction, with LIME-based clinical decision support.
+![PyTorch](https://img.shields.io/badge/PyTorch-research%20models-EE4C2C?logo=pytorch&logoColor=white)
+![Architecture](https://img.shields.io/badge/Architecture-GCN%20%2B%20Transformer-7357D5)
+![Data](https://img.shields.io/badge/Data-synthetic%20demo-168D73)
 
-## Motivation
+[Overview](#overview) · [Architecture](#architecture) · [Data](#synthetic-task-and-inputs) · [Training](#installation-and-training) · [Interpretation](#explanation-method) · [Reproducibility](#reproducibility-and-research-boundaries)
 
-Existing sequential models (LSTM, 1D-CNN) treat psychiatric assessments as independent time series, discarding the **relational structure** between co-occurring symptoms. Clinical evidence shows that rapid-cycling bipolar disorder is characterised by tightly coupled mood–energy–impulsivity clusters that manifest as distinctive patterns in the symptom co-occurrence graph — information that is lost when symptoms are processed channel-by-channel.
+</div>
 
-PsychoGraph-Net addresses this by jointly encoding:
-- **Graph stream** symptom co-occurrence topology extracted from patient EHR data via Neo4j
-- **Temporal stream** longitudinal symptom dynamics via a pre-norm Transformer encoder
+## Overview
 
----
+PsychoGraph-Net combines a symptom graph encoder with a temporal Transformer for a binary classification demonstration. LSTM and CNN baselines provide temporal-only comparisons.
+
+The executable workflow generates synthetic patient-like sequences. **The labels and discriminative patterns are simulator-defined; held-out performance on this task is not evidence of clinically validated rapid-cycling prediction.** The repository does not include a real-patient cohort, prospective outcomes, or a validated clinical forecasting horizon.
+
+| Component | Implemented role |
+|---|---|
+| Synthetic generator | Simulated assessments, labels, summary features, and correlation graphs |
+| Graph stream | Two GCN layers with attention pooling |
+| Temporal stream | Projected sequences, learned position embeddings, Transformer layers, mean pooling |
+| Fusion head | Concatenated embeddings mapped to two logits |
+| Baselines | LSTM and CNN models using temporal inputs |
+| Training | Validation-F1 checkpoint selection and held-out test metrics |
+| Explanation | Local temporal perturbation sensitivity |
+| Neo4j loader | Separate data-access module; not connected to the training CLI |
 
 ## Architecture
 
-```
-  Node features [B, N, 3]          Temporal sequence [B, T, N_SYM]
-         │                                     │
-  ┌──────▼──────┐                    ┌─────────▼─────────┐
-  │  GraphEncoder│                   │TemporalTransformer │
-  │ 2-layer GCN  │                   │ Pre-LN · 2L · 4H   │
-  │ + attn pool  │                   └─────────┬──────────┘
-  └──────┬──────┘                              │
-         │ [B, 64]                             │ [B, 64]
-         └──────────────────┬─────────────────┘
-                            │ concat [B, 128]
-                     ┌──────▼──────┐
-                     │  Fusion MLP  │
-                     │ 128→64→32→2  │
-                     └─────────────┘
+```mermaid
+flowchart TD
+    A[Synthetic assessment sequence] --> B[Temporal Transformer]
+    A --> C[Node summaries and correlation graph]
+    C --> D[Two-layer GCN and attention pooling]
+    B --> E[Concatenate embeddings]
+    D --> E
+    E --> F[Fusion MLP]
+    F --> G[Two-class logits]
 ```
 
-**GraphEncoder** — Symmetric normalised GCN (`D⁻¹/² A D⁻¹/²`) with GELU + LayerNorm and soft attention pooling over nodes.
+The default graph and temporal embeddings each have dimension 64; the fusion head uses 128 → 64 → 32 → 2 layers.
 
-**TemporalTransformer** — Linear projection + learnable positional embedding → pre-norm Transformer encoder → mean pooling.
+Normalized adjacency is constructed as $\hat A=D^{-1/2}AD^{-1/2}$ with self-loops. Graph propagation applies a learned projection, LayerNorm, GELU, and dropout to $\hat A H$. The temporal encoder uses four attention heads, two layers, learned positional embeddings, and mean pooling.
 
-**Fusion MLP** — Concatenated joint embedding → two-layer classifier with GELU and dropout regularisation.
+See [the graph encoder](models/gnn.py), [temporal encoder](models/transformer.py), and [fusion model](models/psychograph_net.py) for exact operations.
 
----
+## Synthetic task and inputs
 
-## Results
+The default generator creates 600 simulated patients, 12 assessment steps, and 15 named symptom features. Binary labels are drawn first; class-dependent cycles, shared latent factors, or low-amplitude drift are then injected into the sequences.
 
-Evaluated on N=600 synthetic patients (15 symptoms, seq_len=12) with graph-topology-embedded discriminative signal — reflecting the clinical reality that relational structure is necessary to separate rapid cyclers from non-cyclers.
+These names provide a psychiatric modeling context, but generated numerical values are not validated clinical-scale measurements. No observed episode-count outcome or future follow-up window is derived.
 
-| Model | Accuracy | Precision | Recall | F1 (macro) | AUC-ROC |
-|---|---|---|---|---|---|
-| LSTM | 0.9556 | 0.9554 | 0.9554 | 0.9554 | 0.9876 |
-| CNN | 0.9667 | 0.9674 | 0.9658 | 0.9665 | 0.9886 |
-| **PsychoGraph-Net** | **0.9778** | **0.9800** | **0.9762** | **0.9776** | **0.9903** |
-
-**ΔF1 vs LSTM: +2.22 pp · ΔF1 vs CNN: +1.11 pp**
-
-> The published paper reports +11% F1 over LSTM/CNN baselines on the real clinical dataset.  
-> Synthetic results above are for reproducibility demonstration only.
-
----
-
-## LIME Explainability
-
-Feature attribution via perturbation-based LIME over the temporal symptom dimension. For each symptom, the time series is replaced with Gaussian noise and the resulting change in P(rapid cycling) is measured.
-
-Top attributions on a representative rapid-cycling patient:
-
-| Rank | Symptom | LIME Score |
+| Tensor | Default shape | Meaning |
 |---|---|---|
-| 1 | Mood Elevation | 1.000 |
-| 2 | Impulsivity | 0.067 |
-| 3–15 | Other symptoms | ≈0.000 |
+| Temporal data | `[N, 12, 15]` | Assessment values by time and symptom |
+| Node features | `[N, 15, 3]` | Per-symptom mean, standard deviation, and range |
+| Adjacency | `[N, 15, 15]` | Symmetrically normalized graph |
+| Labels | `[N]` | Simulator-defined class 0 or 1 |
 
-Consistent with clinical DSM-5 rapid-cycling criteria — mood elevation (hypomanic/manic episodes) is the primary diagnostic signal.
+Edges are based on absolute within-sequence Pearson correlation above 0.22. Both positive and negative correlations become unsigned edges. Graph features summarize the same sequence supplied to the Transformer.
 
+## Installation and training
 
-## Repository Structure
-
-```
-PsychoGraph-Net/
-├── config.py                     # All hyperparameters and paths
-├── train.py                      # Training entry point
-├── evaluate.py                   # Evaluation + LIME entry point
-├── requirements.txt
-│
-├── data/
-│   ├── synthetic_generator.py    # Synthetic EHR dataset with graph signal
-│   └── neo4j_loader.py           # Production Neo4j integration
-│
-├── models/
-│   ├── psychograph_net.py        # Proposed model (main)
-│   ├── gnn.py                    # GCNLayer + GraphEncoder
-│   ├── transformer.py            # TemporalTransformerEncoder
-│   └── baselines.py              # LSTMBaseline, CNNBaseline
-│
-├── explainability/
-│   └── lime_explainer.py         # LIME attribution (model-agnostic)
-│
-├── results/
-│   ├── checkpoints/              # Saved model weights (.pt)
-│   └── figures/                  # Generated plots
-│
-└── notebooks/
-    └── demo.ipynb                # End-to-end walkthrough
-```
-
----
-
-## Installation
+Use Python 3.10+ because the source uses modern union type syntax. Run commands from the repository root in an isolated environment.
 
 ```bash
-git clone https://github.com/Abdullah-Al-Foysal/PsychoGraph-Net.git
+git clone https://github.com/Foysal-A-Al/PsychoGraph-Net.git
 cd PsychoGraph-Net
-pip install -r requirements.txt
+python -m venv .venv
 ```
 
-Python ≥ 3.9 and PyTorch ≥ 2.0 are required. CUDA is optional.
-
----
-
-## Usage
-
-### Train all models
+Activate with `source .venv/bin/activate` on Linux/macOS or `.venv\Scripts\Activate.ps1` in Windows PowerShell:
 
 ```bash
-python train.py
+python -m pip install -r requirements.txt
+python train.py --model all
 ```
+
+A shorter functional experiment can use:
 
 ```bash
-python train.py --epochs 150 --lr 5e-4 --model pgn
+python train.py --model pgn --epochs 5
 ```
 
-Options:
+Five epochs are a smoke-run choice, not a performance recommendation.
 
-| Flag | Default | Description |
+| CLI option | Default | Meaning |
 |---|---|---|
-| `--epochs` | 100 | Number of training epochs |
-| `--lr` | 8e-4 | Learning rate |
-| `--model` | all | `pgn`, `lstm`, `cnn`, or `all` |
+| `--model` | `all` | `pgn`, `lstm`, `cnn`, or all three |
+| `--epochs` | 100 | Training epochs |
+| `--lr` | 0.0008 | AdamW learning rate |
 
-### Evaluate with LIME
+Training splits patient indices into 70% training, 15% validation, and 15% test sets with stratification. The best checkpoint is selected by validation macro F1. The optimizer uses weight decay 0.0001, gradient clipping, and cosine annealing with warm restarts.
+
+Current entry points leave models and tensors on CPU; automatic GPU selection is not implemented. The requirements file installs Neo4j and the external LIME package too, although the default synthetic workflow does not require either integration.
+
+## Evaluation and outputs
+
+Always pass a trained checkpoint when evaluating:
 
 ```bash
 python evaluate.py --model pgn --ckpt results/checkpoints/pgn_best.pt
+python evaluate.py --model lstm --ckpt results/checkpoints/lstm_best.pt
 ```
 
-### Use the model programmatically
+**Without `--ckpt`, evaluation uses random model weights.** It does not automatically load the best training checkpoint.
 
-```python
-import torch
-from models import PsychoGraphNet
+| Output | Contents |
+|---|---|
+| `results/checkpoints/pgn_best.pt` | PGN model state and selected validation F1 |
+| `results/checkpoints/lstm_best.pt` | LSTM checkpoint when trained |
+| `results/checkpoints/cnn_best.pt` | CNN checkpoint when trained |
+| `results/test_results.json` | Training-entry-point test metrics for selected models |
+| `results/lime_attribution.json` | PGN temporal perturbation results from evaluation |
 
-model = PsychoGraphNet()
-print(f"Parameters: {model.count_parameters():,}")
+Reported metrics are accuracy, macro precision, macro recall, macro F1, and ROC AUC. No fixed score is asserted here without a saved checkpoint, environment, and matching experiment configuration.
 
-# Dummy batch
-B, T, N = 8, 12, 15
-temporal   = torch.randn(B, T, N)
-node_feats = torch.randn(B, N, 3)
-adj        = torch.eye(N).unsqueeze(0).expand(B, -1, -1)
+Training and evaluation regenerate data independently from `config.py`. Keep its data configuration unchanged between runs. Checkpoints do not save a full configuration or split manifest.
 
-logits = model(temporal, node_feats, adj)   # [B, 2]
-```
+## Configuration and reproducibility
 
-### Use the LIME explainer
+[config.py](config.py) defines data, model, training, and output settings. Data settings are read by the generator, while CLI epoch and learning-rate values override their training defaults.
 
-```python
-from explainability.lime_explainer import LIMEExplainer
+Models are instantiated with their constructors' default arguments. Editing `CFG.model` alone does not wire those settings into model construction; changes require explicit constructor arguments and matching evaluation setup.
 
-explainer = LIMEExplainer(model, use_graph=True, n_perturbations=200)
-result = explainer.explain(temporal[0], node_feats[0], adj[0])
-explainer.print_report(result)
+Data generation and splits use a fixed seed. The training entry point does not explicitly seed PyTorch initialization or DataLoader shuffling, so the configured seed does not guarantee identical trained weights.
 
-## Configuration
+Preserve the repository commit, exact dependencies, configuration, checkpoint, split identities, and metrics for any reported result. Current requirements specify lower bounds rather than a locked environment.
 
-All hyperparameters are centralised in `config.py`:
+## Explanation method
 
-```python
-from config import CFG
+The class named `LIMEExplainer` replaces one symptom's temporal sequence with Gaussian noise, measures the mean absolute change in target-class probability, and min–max normalizes these changes across symptoms.
 
-CFG.train.epochs     = 150
-CFG.train.lr         = 5e-4
-CFG.data.n_patients  = 1000
-```
+It does **not** fit the weighted local surrogate used in standard LIME. A more precise interpretation is temporal perturbation sensitivity.
 
----
+For PGN explanations, node features and adjacency remain unchanged while the temporal input is perturbed. Results therefore describe sensitivity through the temporal branch conditional on the original graph inputs, not a complete joint graph-and-time attribution or a causal effect.
 
-## Hyperparameters
+## Neo4j integration
 
-| Component | Parameter | Default |
-|---|---|---|
-| GNN | Hidden dim | 48 |
-| GNN | Output dim | 64 |
-| GNN | Layers | 2 |
-| Transformer | d_model | 64 |
-| Transformer | Heads | 4 |
-| Transformer | Layers | 2 |
-| Transformer | Dropout | 0.15 |
-| Fusion MLP | Hidden | 64 → 32 |
-| Fusion MLP | Dropout | 0.30 |
-| Optimizer | AdamW, lr=8e-4, wd=1e-4 | |
-| Scheduler | CosineAnnealingWarmRestarts T₀=20 | |
+[data/neo4j_loader.py](data/neo4j_loader.py) reads patient labels and `seq_data_json`, then reconstructs features and graphs. Despite the illustrative relationship schema in its docstring, the implemented query does not load graph relationships from Neo4j.
 
----
+The training CLI still calls the synthetic generator. Using Neo4j data requires explicit integration, input/label validation, and a documented missing-data policy. The loader zero-fills unprovided values; that behavior is not a validated clinical imputation strategy.
 
-## Clinical Context
+## Reproducibility and research boundaries
 
-Bipolar disorder rapid cycling is defined by ≥4 mood episodes per year and is associated with poor pharmacological response and elevated suicide risk. Early, accurate identification enables clinicians to adjust treatment protocols proactively.
+No automated test suite, CI workflow, saved trained checkpoints, or independently verified benchmark report is included in this checkout. Training and upstream database access were not verified in this README update.
 
-This work was developed in collaboration with clinical researchers at the Istituto di Psicopatologia, Rome, and is part of a broader programme on trustworthy AI for psychiatric decision support.
+Before drawing research conclusions, address repeated-seed variability, comparable model-input ablations, confidence intervals, calibration, subgroup behavior, outcome definitions, and external validation. Simulator-induced separability cannot establish clinical utility.
 
+This software is a research prototype, not a diagnostic, treatment, or crisis-assessment tool.
 
----
+## Attribution and licensing
 
-## Author
+Maintained by [Abdullah Al Foysal](https://github.com/Foysal-A-Al). The previous project description records collaboration with clinical researchers at the Istituto di Psicopatologia, Rome; that context does not substitute for validation of this synthetic demonstration.
 
-**Abdullah Al Foysal**  
-MSc Computer Engineering (AI) · University of Genoa    
-
-[Google Scholar](https://scholar.google.com/citations?user=cQ_zolQAAAAJ) · [LinkedIn](https://linkedin.com/in/abdullah-al-foysal1)
+Cite the repository and exact commit used. No license file is currently included; clarify applicable reuse permissions before redistribution.
